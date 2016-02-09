@@ -1,0 +1,185 @@
+---
+title: "test mining 1"
+output: html_document
+---
+
+---
+title: "test mining 1"
+output: html_document
+---
+
+This project is to practise texting mining technics by using movie comments from "Douban". 
+
+Load the package and set up woring place
+```{r, echo=TRUE}
+library(rJava)
+library(Rwordseg)
+library(XML)
+library(wordcloud)
+setwd("I:/R Data")
+```
+
+---
+title: "test mining 1"
+output: html_document
+---
+
+This project is to practise texting mining technics by using movie comments from "Douban". 
+
+Load the package and set up woring place
+```{r}
+library(rJava)
+library(Rwordseg)
+library(XML)
+library(wordcloud)
+setwd("I:/R Data")
+```
+
+*Part 1
+Get data from douban.com. I use web scraping method to extract data from the website.*
+
+Get first page comment
+```{r}
+u = "http://movie.douban.com/subject/11589036/comments"
+doc = htmlParse(u)
+
+# function to get comments from one page
+comment = function(html)
+{
+  comment = xpathSApply(html, "//div[@class='comment']//p", xmlValue)
+  clean_com = lapply(comment, function(x) gsub(" ", "\\1",x))
+  clean_com = lapply(clean_com, function(x) gsub("\n", "\\1",x))
+  return(clean_com)
+}
+```
+
+In order to automatically do the web scraping, I need to find the next page link.
+```{r}
+# funtion for next page
+next_page = function(html)
+{  
+  link = unlist(getNodeSet(html, "//div[@id='paginator']//a[@class = 'next']/@href"))
+  nxt = paste0("http://movie.douban.com/subject/11589036/comments",link)
+  nxt = htmlParse(nxt)
+  return(nxt)
+}
+```
+
+Combine the comment and next_page function to scrape the first 10 pages' comments.
+```{r}
+# start web scraping
+page = list()
+for(i in 1:10)
+{
+  page[i] = list(comment(doc))
+  next_p = next_page(doc)
+  doc = next_p
+}
+```
+
+*Part 2
+start text segmentation. seprate the whole Chinese sentence into words.
+
+In order to make the segentation effcietlly, I need to remove the stop words, invalid words, and add dictionary.
+```{r}
+# add stopwords and invallid words
+stopwords = readLines("stopword.txt")
+
+invalid.words = c ("电影", "演员", "导演", "我们", "他们", "一个", "没有",
+                   "所以", "可以", "影片", "但是", "因为", "什么", "自己",
+                   "这个", "故事", "最后", "这样", "觉得", "为了", "一部",
+                   "这部", "片子", "其实", "当然", "时候", "看到", "已经",
+                   "这种", "知道", "这些", "一样", "如果", "观众", "人物",
+                   "开始", "那么", "那个", "可能", "情节", "结局", "结尾",
+                   "风格", "节奏", "剧情", "有点", "终于", "之后", "怎么",
+                   "一种", "出现", "作品", "地方", "本片", "一些", "一定",
+                   "之前", "还是", "虽然", "这么", "角色", "这么", "不过",
+                   "类型", "以为", "显得", "还是", "算是", "东西", "有些")
+# add word dict
+insertWords(c("画面", "水墨风","中国风","阿宝")) 
+installDict("hah.scel", "dict1", dicttype = "scel", load = T)
+
+```
+
+Write functions to move the stop words and invalid words
+```{r}
+# filter function
+filterWord = function(strs) 
+{
+  theflags = strs %in% invalid.words
+  strs[!theflags]
+}
+
+# stop function
+stopWord = function(strs) 
+{
+  theflags <- strs %in% stopwords
+  strs[!theflags]
+}
+```
+
+start segment by using segmentCN funtion from Rwordseg package, and remove the nonsense words.
+```{r}
+# start segment
+comment.words = lapply(page1, segmentCN)
+comment.words = lapply(comment.words, filterWord)
+comment.words = lapply(comment.words, stopWord)
+
+saveRDS(comment.words, file = "douban_comment.rds")
+```
+
+*Part 3 
+Make wordcloud plot to visualize the data
+
+```{r}
+# count the freq
+
+comment.words = readRDS("douban_comment.rds")
+freq <- sort(table(unlist(comment.words)), decreasing = T)
+comment.words.name <- names(freq)
+comment.words.freq <- as.numeric(freq)
+wordsData <- data.frame(words =comment.words.name, freq = comment.words.freq) 
+
+# plot wordcould
+library(wordcloud) 
+top20 <- wordsData[wordsData$freq>15,]   
+colors=brewer.pal(8,"Dark2")
+wordcloud(top20$words,top20$freq,c(3,.3),colors=colors,random.order=F) 
+```
+
+*Part 4
+Text cluster 
+
+K means
+```{r}
+library(tm)
+corpus  <-Corpus(VectorSource(comment.words))
+comment_dtm<- DocumentTermMatrix(corpus,control=list(wordLengths=c(1,Inf))) 
+comment.matrix <- as.matrix(comment_dtm) 
+head(comment.matrix)
+
+k <- 5  
+kmeansRes <- kmeans(comment.matrix,k) #k是聚类数  
+mode(kmeansRes)
+names(kmeansRes)  
+head(kmeansRes$cluster,10)  
+kmeansRes$size
+
+hlzj.kmeansRes <- list(content=page1,type=kmeansRes$cluster)  
+write.csv(hlzj.kmeansRes,"hlzj_kmeansRes.csv")  
+fix(hlzj.kmeansRes)  
+```
+
+
+```{r}
+#hclust()
+d <- dist(comment.matrix,method="euclidean")  
+hclustRes <- hclust(d,method="complete")  
+hclustRes.type <- cutree(hclustRes,k=5) #按聚类结果分5个类别  
+length(hclustRes.type)  
+hclustRes.type[1:10]  
+
+hlzj.hclustRes <- list(content=page1,type=hclustRes.type)  
+hlzj.hclustRes <- as.data.frame(hlzj.hclustRes)  
+fix(hlzj.hclustRes) 
+```
